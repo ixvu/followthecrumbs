@@ -2,13 +2,18 @@ package com.indix.ml.analysis.breadcrumbs
 
 import java.io.File
 
+import breeze.linalg.{SparseVector, sum}
 import edu.mit.jwi.RAMDictionary
 import edu.mit.jwi.data.ILoadPolicy
 import edu.mit.jwi.item.POS
 import edu.mit.jwi.morph.WordnetStemmer
 
 import scala.collection.JavaConverters._
-import org.apache.log4j.{Level,Logger}
+import org.apache.log4j.{Level, Logger}
+
+import scala.io.BufferedSource
+import org.json4s._
+import org.json4s.native.JsonMethods._
 
 /**
   * Created by vumaasha on 18/11/16.
@@ -22,24 +27,50 @@ object WordNetTokenizer {
   dict.open()
   val stemmer = new WordnetStemmer(dict)
 
-  def tokenize(doc: String): Array[String] = {
-    try {
-      val token_pattern = "\\b\\w\\w+\\b".r
-      token_pattern.findAllIn(doc.toLowerCase).flatMap((token) => {
-        stemmer.findStems(token, POS.NOUN)
-      }.asScala).toSet.toArray
-    } catch {
-      case e: Throwable  => {
-        logger.info(s"The errored document is $doc")
-        logger.info(e)
-        Array.empty
-      }
+  val vocabResource = getClass.getResourceAsStream("/TopLevelVocabulary.json")
+  val source: BufferedSource = scala.io.Source.fromInputStream(vocabResource)
+  val vocabularyJson = try source.mkString finally source.close()
+  val jsVal = parse(vocabularyJson)
+  val vocabulary:Map[String,Int] = {
+    val vocabTokens:Seq[(String,Int)] = for {
+      JObject(child) <- jsVal
+      JField(a,JInt(b)) <- child
+    } yield (a,b.toInt)
+    Map(vocabTokens:_*)
+  }
+
+  val vocabSize = vocabulary.size
+
+  def tokenize(doc: String) = {
+    val token_pattern = "\\b\\w\\w+\\b".r
+    val stems = {
+      for {
+        token <- token_pattern.findAllIn(doc.toLowerCase)
+        stem <- stemmer.findStems(token, null).asScala
+      } yield stem
+    }.toArray
+    val coocc = for {
+      stemI <- stems.zipWithIndex
+      stemJ <- stems.zipWithIndex if stemJ._2 > stemI._2
+    } yield {
+      val (t1:String,t2:String) = if (stemI._1 < stemJ._1) (stemI._1,stemJ._1) else (stemJ._1,stemI._1)
+      s"${t1}_$t2"
     }
+    for {
+      token <- stems ++ coocc if vocabulary contains token
+    } yield token
+  }
+
+  def vectorize(doc:String) = {
+      val tokenFreq = for {
+        (token,values) <- tokenize(doc).groupBy(identity)
+      } yield (vocabulary(token),values.size.toDouble)
+    val vector = SparseVector(vocabSize)(tokenFreq.toSeq:_*)
+    vector / sum(vector)
   }
 
   def main(args: Array[String]): Unit = {
-    val tokens = tokenize("\"Home > Watches > Ice-Watch Watches > Ice-Watch Unisex Watches > Ice-Pure")
-    tokenize("")
+    val tokens = vectorize("electronics electronics watches battery cable microphone supply power player")
     tokens.foreach(println(_))
   }
 }

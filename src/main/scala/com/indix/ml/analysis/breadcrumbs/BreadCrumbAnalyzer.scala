@@ -14,7 +14,7 @@ object BreadCrumbAnalyzer {
     logger.info(s"The output file is $outputFile")
     val spark = SparkSession.builder().appName("BreadCrumbAnalyzer").getOrCreate()
     val breadCrumbsDs = spark.read.json(breadCrumbsFile)
-    breadCrumbsDs.repartition(breadCrumbsDs("storeId")).cache().createOrReplaceTempView("store_bc")
+    breadCrumbsDs.repartition(3000).cache().createOrReplaceTempView("store_bc")
     spark.udf.register("tokenize", (doc: String) => WordNetTokenizer.tokenize(doc))
     val tokenDF = spark.sql("" +
       "select " +
