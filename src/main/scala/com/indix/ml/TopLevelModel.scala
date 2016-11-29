@@ -1,5 +1,6 @@
 package com.indix.ml
 
+import breeze.linalg.{DenseVector, SparseVector}
 import org.apache.log4j.{Level, Logger}
 import org.json4s._
 import org.json4s.native.JsonMethods._
@@ -44,6 +45,15 @@ class TopLevelModel(modelPath: String) {
   }
 
   def getCategory(id:Int) = categoryMapping(categoryIds(id))
+
+  val intercept:DenseVector[Double] = {
+     val intercepts = for {
+       JObject(child) <- modelJsValue
+       JField("intercept",JArray(intList)) <- child
+       JDouble(b) <- intList
+     } yield b
+    DenseVector(intercepts:_*)
+  }
 }
 
 object TopLevelModel {
