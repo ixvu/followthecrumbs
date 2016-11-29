@@ -2,18 +2,16 @@ package com.indix.ml.analysis.breadcrumbs
 
 import java.io.File
 
-import breeze.linalg.{SparseVector, sum}
+import breeze.linalg.{SparseVector, sum, normalize}
 import edu.mit.jwi.RAMDictionary
 import edu.mit.jwi.data.ILoadPolicy
-import edu.mit.jwi.item.POS
 import edu.mit.jwi.morph.WordnetStemmer
-
-import scala.collection.JavaConverters._
 import org.apache.log4j.{Level, Logger}
-
-import scala.io.BufferedSource
 import org.json4s._
 import org.json4s.native.JsonMethods._
+
+import scala.collection.JavaConverters._
+import scala.io.BufferedSource
 
 /**
   * Created by vumaasha on 18/11/16.
@@ -66,7 +64,7 @@ object WordNetTokenizer {
         (token,values) <- tokenize(doc).groupBy(identity)
       } yield (vocabulary(token),values.size.toDouble)
     val vector = SparseVector(vocabSize)(tokenFreq.toSeq:_*)
-    vector / sum(vector)
+    normalize(vector / sum(vector),2.0)
   }
 
   def main(args: Array[String]): Unit = {
