@@ -1,9 +1,10 @@
 package com.indix.ml
 
-import breeze.linalg.{DenseVector, SparseVector}
+import breeze.linalg.{DenseVector, SparseVector, max, argmax,sum}
 import org.apache.log4j.{Level, Logger}
 import org.json4s._
 import org.json4s.native.JsonMethods._
+import breeze.numerics.exp
 
 import scala.io.BufferedSource
 
@@ -86,6 +87,23 @@ class TopLevelModel(modelPath: String) {
       } yield (index.toInt, featureCoeff)
       SparseVector(vocabulary.size)(tuples: _*)
     }
+  }
+
+  def predictProba(X: SparseVector[Double]): DenseVector[Double] = {
+    /*    Probability estimation for OvR logistic regression.
+
+            Positive class probabilities are computed as
+            1. / (1. + np.exp(-self.decision_function(X)));
+            multiclass is handled by normalizing that over all classes */
+
+    val dots = for {
+      clsCoeff <- coefficients
+    } yield clsCoeff dot X
+    val coeffDot = DenseVector(dots: _*) + intercept
+    val denom = exp(-1.0 * (coeffDot)) + 1.0
+    val classWiseProb = 1.0 / denom
+    val prob = classWiseProb / sum(classWiseProb)
+    prob
   }
 }
 
