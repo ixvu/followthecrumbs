@@ -1,7 +1,8 @@
 package com.indix.ml.analysis.breadcrumbs
 
+import com.indix.ml.preprocessing.tokenizers.WordNetTokenizer
 import org.apache.spark.sql.SparkSession
-import org.apache.log4j.{Level,Logger}
+import org.apache.log4j.{Level, Logger}
 
 object BreadCrumbAnalyzer {
   def main(args: Array[String]) {
@@ -15,7 +16,7 @@ object BreadCrumbAnalyzer {
     val spark = SparkSession.builder().appName("BreadCrumbAnalyzer").getOrCreate()
     val breadCrumbsDs = spark.read.json(breadCrumbsFile)
     breadCrumbsDs.repartition(3000).cache().createOrReplaceTempView("store_bc")
-    spark.udf.register("tokenize", (doc: String) => WordNetTokenizer.tokenize(doc))
+    spark.udf.register("tokenize", (doc: String) => WordNetTokenizer().tokenize(doc))
     val tokenDF = spark.sql("" +
       "select " +
       "   storeId,storeName, collect_set(token) as tokens from " +

@@ -1,10 +1,11 @@
-package com.indix.ml
+package com.indix.ml.models
 
-import breeze.linalg.{DenseVector, SparseVector, max, argmax,sum}
+import breeze.linalg.{DenseVector, SparseVector, argmax, normalize, sum}
+import breeze.numerics.exp
+import com.indix.ml.preprocessing.tokenizers.WordNetTokenizer
 import org.apache.log4j.{Level, Logger}
 import org.json4s._
 import org.json4s.native.JsonMethods._
-import breeze.numerics.exp
 
 import scala.io.BufferedSource
 
@@ -100,10 +101,42 @@ class TopLevelModel(modelPath: String) {
       clsCoeff <- coefficients
     } yield clsCoeff dot X
     val coeffDot = DenseVector(dots: _*) + intercept
-    val denom = exp(-1.0 * (coeffDot)) + 1.0
+    val denom = exp(-1.0 * coeffDot) + 1.0
     val classWiseProb = 1.0 / denom
     val prob = classWiseProb / sum(classWiseProb)
     prob
+  }
+
+  val tokenizer = WordNetTokenizer()
+
+  def tokenize(doc: String) = {
+    val stems = tokenizer.tokenize(doc)
+    val coocc = for {
+      stemI <- stems.zipWithIndex
+      stemJ <- stems.zipWithIndex if stemJ._2 > stemI._2
+    } yield {
+      val (t1: String, t2: String) = if (stemI._1 < stemJ._1) (stemI._1, stemJ._1) else (stemJ._1, stemI._1)
+      s"${t1}_$t2"
+    }
+    for {
+      token <- stems ++ coocc if vocabulary contains token
+    } yield token
+  }
+
+  def vectorize(doc: String) = {
+    val tokenFreq = for {
+      (token, values) <- tokenize(doc).groupBy(identity)
+    } yield (vocabulary(token), values.length.toDouble)
+    val vector = SparseVector(vocabulary.size)(tokenFreq.toSeq: _*)
+    normalize(vector / sum(vector), 2.0)
+  }
+
+  def predictCategory(doc: String) = {
+    val prob = predictProba(vectorize(doc))
+    val maxarg = argmax(prob)
+    val categoryId = categoryIds(maxarg)
+    val category = categoryMapping(categoryId)
+    (categoryId, category, prob(maxarg))
   }
 }
 
