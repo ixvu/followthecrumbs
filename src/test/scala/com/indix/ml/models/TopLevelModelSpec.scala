@@ -11,8 +11,8 @@ class TopLevelModelSpec extends FlatSpec with Matchers{
 
   it should "predict home & kitchen category" in {
     val model = TopLevelModel()
-    val prediction = model.predictCategory("home kitchen")
-    prediction._2 should be (10164)
+    val prediction = model.categorize("home kitchen")
+    prediction._1 should be (10164)
 
   }
 

@@ -3,7 +3,8 @@ package com.indix.ml.analysis.breadcrumbs
 import breeze.linalg.DenseVector
 import com.indix.ml.models.TopLevelModel
 import org.apache.log4j.{Level, Logger}
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{Row, SparkSession}
 
 case class BreadCrumb(storeId: Int, storeName: String, doc: String, freq: Int) {
   def categorize(implicit topLevelModel: TopLevelModel) = {
@@ -41,8 +42,11 @@ object BreadCrumbAnalyzer {
     breadCrumbsDs.cache().createOrReplaceTempView("store_bc")
     implicit lazy val model = TopLevelModel()
     val breadCrumbCategory = breadCrumbsDs.rdd.map(r => r.categorize)
-    val storeWiseProbs = breadCrumbCategory.keyBy(x => x.storeId).reduceByKey(_ + _).values.toDF
-    storeWiseProbs.coalesce(1).write.option("compression", "gzip").mode("overwrite").json(outputFile)
+    val byStore: RDD[(Int, BreadCrumbCategory)] = breadCrumbCategory.keyBy(x => x.storeId)
+    val storeWiseProbs = byStore.reduceByKey(_ + _).values
+    val storeCategories = breadCrumbCategory.map(x => model.predictCategory(DenseVector(x.prob)))
+    storeCategories.keyBy(x => (x._1, x._2))
+    //    probDf.coalesce(1).write.option("compression", "gzip").mode("overwrite").json(outputFile)
     spark.stop()
   }
 

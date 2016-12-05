@@ -133,12 +133,16 @@ class TopLevelModel(modelPath: String) {
     } else SparseVector(vocabulary.size)(0->0.0)
   }
 
-  def predictCategory(doc: String) = {
+  def categorize(doc: String) = {
     val prob: DenseVector[Double] = predictProba(doc)
+    predictCategory(prob)
+  }
+
+  def predictCategory(prob: DenseVector[Double]): (Int, String, Double) = {
     val maxarg = argmax(prob)
     val categoryId = categoryIds(maxarg)
     val category = categoryMapping(categoryId)
-    (prob, categoryId, category, prob(maxarg))
+    (categoryId, category, prob(maxarg))
   }
 
   def predictProba(doc: String): DenseVector[Double] = {
