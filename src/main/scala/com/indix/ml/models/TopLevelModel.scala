@@ -1,6 +1,6 @@
 package com.indix.ml.models
 
-import breeze.linalg.{DenseVector, SparseVector, argmax, normalize, sum}
+import breeze.linalg.{DenseVector, SparseVector, argmax, normalize, sum, convert}
 import breeze.numerics.exp
 import com.indix.ml.preprocessing.tokenizers.WordNetTokenizer
 import org.apache.log4j.{Level, Logger}
@@ -127,16 +127,23 @@ class TopLevelModel(modelPath: String) {
     val tokenFreq = for {
       (token, values) <- tokenize(doc).groupBy(identity)
     } yield (vocabulary(token), values.length.toDouble)
-    val vector = SparseVector(vocabulary.size)(tokenFreq.toSeq: _*)
-    normalize(vector / sum(vector), 2.0)
+    if (tokenFreq.size >0 ){
+      val vector = SparseVector(vocabulary.size)(tokenFreq.toSeq: _*)
+      normalize(vector / sum(vector), 2.0)
+    } else SparseVector(vocabulary.size)(0->0.0)
   }
 
   def predictCategory(doc: String) = {
-    val prob = predictProba(vectorize(doc))
+    val prob: DenseVector[Double] = predictProba(doc)
     val maxarg = argmax(prob)
     val categoryId = categoryIds(maxarg)
     val category = categoryMapping(categoryId)
-    (categoryId, category, prob(maxarg))
+    (prob, categoryId, category, prob(maxarg))
+  }
+
+  def predictProba(doc: String): DenseVector[Double] = {
+    val prob = predictProba(vectorize(doc))
+    prob
   }
 }
 
