@@ -1,19 +1,29 @@
 package com.indix.ml.analysis.breadcrumbs
 
+import breeze.linalg.DenseVector
 import com.indix.ml.models.TopLevelModel
 import org.apache.log4j.{Level, Logger}
-import org.apache.spark.sql.{Row, SparkSession}
-
-import scala.collection.parallel.CollectionsHaveToParArray
+import org.apache.spark.sql.SparkSession
 
 case class BreadCrumb(storeId: Int, storeName: String, doc: String, freq: Int) {
   def categorize(implicit topLevelModel: TopLevelModel) = {
-    val (probVect, categoryId, category, prob) = topLevelModel.predictCategory(doc)
-    BreadCrumbCategory(storeId, storeName, doc, freq, probVect.toArray, categoryId, category, prob)
+    val prob = topLevelModel.predictProba(doc)
+    BreadCrumbCategory(storeId, storeName, freq, prob.toArray)
   }
 }
 
-case class BreadCrumbCategory(storeId: Int, storeName: String, doc: String, freq:Int, prob: Array[Double], categoryId: Int, category: String, classProb: Double)
+case class BreadCrumbCategory(storeId: Int, storeName: String, freq: Int, prob: Array[Double]) {
+
+  def weightedProb: DenseVector[Double] = DenseVector(prob: _*) * freq.toDouble
+
+  def +(other: BreadCrumbCategory) = {
+    require(storeId == other.storeId)
+    val prob: DenseVector[Double] = weightedProb + other.weightedProb
+    BreadCrumbCategory(storeId, storeName, freq + other.freq, prob.toArray)
+  }
+
+  def normalize = (DenseVector(prob) / freq.toDouble).toArray
+}
 
 
 object BreadCrumbAnalyzer {
@@ -30,14 +40,9 @@ object BreadCrumbAnalyzer {
     val breadCrumbsDs = spark.read.json(breadCrumbsFile).as[BreadCrumb]
     breadCrumbsDs.cache().createOrReplaceTempView("store_bc")
     implicit lazy val model = TopLevelModel()
-    breadCrumbsDs.rdd.map(r => r.categorize)
-    spark.udf.register("tokenize", (doc: String) => model.predictProba(doc))
-    val tokenDF = spark.sql("" +
-      "select " +
-      "   storeId,storeName, collect_set(token) as tokens from " +
-      "( select storeId,storeName, explode(tokenize(breadCrumbs)) as token from store_bc) as x" +
-      " group by storeId,storeName")
-    tokenDF.coalesce(1).write.option("compression", "gzip").mode("overwrite").json(outputFile)
+    val breadCrumbCategory = breadCrumbsDs.rdd.map(r => r.categorize)
+    val storeWiseProbs = breadCrumbCategory.keyBy(x => x.storeId).reduceByKey(_ + _).values.toDF
+    storeWiseProbs.coalesce(1).write.option("compression", "gzip").mode("overwrite").json(outputFile)
     spark.stop()
   }
 
