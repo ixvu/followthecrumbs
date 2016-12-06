@@ -5,25 +5,36 @@ import com.indix.ml.models.TopLevelModel
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.StructField
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.functions._
 
 case class BreadCrumb(storeId: Long, storeName: String, breadCrumbs: String, noItems: Long) {
   def categorize(topLevelModel: TopLevelModel) = {
     val prob = topLevelModel.predictProba(breadCrumbs) * noItems.toDouble
     BreadCrumbCategory(storeId, storeName, noItems, prob.toArray)
   }
+
 }
 
-case class BreadCrumbCategory(storeId: Long, storeName: String, noItems: Long, prob: Array[Double]) {
+case class BreadCrumbCategory(storeId: Long, storeName: String, noItems: Long, weightedProb: Array[Double]) {
 
   def +(other: BreadCrumbCategory) = {
     require(storeId == other.storeId)
-    val probSum: DenseVector[Double] = DenseVector(other.prob:_*) + DenseVector(prob:_*)
+    val probSum: DenseVector[Double] = DenseVector(other.weightedProb: _*) + DenseVector(weightedProb: _*)
     BreadCrumbCategory(storeId, storeName, noItems + other.noItems, probSum.toArray)
   }
 
-  def normalize = (DenseVector(prob) / noItems.toDouble).toArray
+  def category(topLevelModel: TopLevelModel) = {
+    val (categoryId, category, probability) = topLevelModel.predictCategory(DenseVector(weightedProb: _*))
+    CategoryPrediction(storeId, storeName, categoryId, category, probability, noItems)
+  }
+
+  def normalize = (DenseVector(weightedProb) / noItems.toDouble).toArray
+}
+
+case class CategoryPrediction(storeId: Long, storeName: String, categoryId: Long, category: String, weightedProb: Double, noItems: Long) {
+  def prob = weightedProb / noItems
 }
 
 
@@ -41,23 +52,36 @@ object BreadCrumbAnalyzer {
     val breadCrumbsDs = spark.read.json(breadCrumbsFile).as[BreadCrumb]
     breadCrumbsDs.cache().createOrReplaceTempView("store_bc")
     implicit lazy val model = TopLevelModel()
+
+    /*
+    Compute the weighted average of store wise probabilities weighted by the breadcrumb frequency
+     */
     val fields = Seq(
       StructField("storeId", LongType, nullable = false),
       StructField("storeName", StringType, nullable = false),
       StructField("noItems", LongType, nullable = false)
     ) ++ (0 to model.categoryIds.size - 1).map(x => StructField("p_" + model.categoryIds(x), DoubleType, nullable = false))
     val schema = StructType(fields)
-
     val breadCrumbCategory = breadCrumbsDs.rdd.map(r => {
       val model = TopLevelModel()
       r.categorize(model)
     })
     val byStore: RDD[(Long, BreadCrumbCategory)] = breadCrumbCategory.keyBy(x => x.storeId)
-    val storeWiseProbs = byStore.reduceByKey(_ + _).values.map(r => Row.fromSeq(Seq(r.storeId, r.storeName, r.noItems) ++ r.normalize))
-
+    val categoryProbabilities: RDD[BreadCrumbCategory] = byStore.reduceByKey(_ + _).values
+    val storeWiseProbs = categoryProbabilities.map(r => Row.fromSeq(Seq(r.storeId, r.storeName, r.noItems) ++ r.normalize))
     val storeWiseProbsDF = spark.createDataFrame(storeWiseProbs, schema)
-    storeWiseProbsDF.show()
     storeWiseProbsDF.coalesce(1).write.mode("overwrite").json(outputFile)
+
+    /*
+    Compute the store wise weighted aggregate of category predicted for each breadcrumb, weighted by breadcrumb frequency
+     */
+    val categoryForBreadCrumb: Dataset[CategoryPrediction] = breadCrumbCategory.map(x => {
+      val model = TopLevelModel()
+      x.category(model)
+    }).toDS()
+
+    val categoryDF = categoryForBreadCrumb.groupBy("storeId", "storeName", "categoryId", "category").agg(expr("sum(weightedProb)/sum(noItems) as probability").as[Double])
+    categoryDF.show()
     spark.stop()
   }
 
