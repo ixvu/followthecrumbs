@@ -11,29 +11,31 @@ import org.apache.spark.sql.functions._
 
 case class BreadCrumb(storeId: Long, storeName: String, breadCrumbs: String, noItems: Long) {
   def categorize(topLevelModel: TopLevelModel) = {
-    val prob = topLevelModel.predictProba(breadCrumbs) * noItems.toDouble
-    BreadCrumbCategory(storeId, storeName, noItems, prob.toArray)
+    val (sparsity, probability): (Double, DenseVector[Double]) = topLevelModel.predictProba(breadCrumbs)
+    val prob = probability * noItems.toDouble
+    val weightedSparsity = sparsity * noItems.toDouble
+    BreadCrumbCategory(storeId, storeName, noItems, prob.toArray, weightedSparsity)
   }
 
 }
 
-case class BreadCrumbCategory(storeId: Long, storeName: String, noItems: Long, weightedProb: Array[Double]) {
+case class BreadCrumbCategory(storeId: Long, storeName: String, noItems: Long, weightedProb: Array[Double], tokenSparsity: Double) {
 
   def +(other: BreadCrumbCategory) = {
     require(storeId == other.storeId)
     val probSum: DenseVector[Double] = DenseVector(other.weightedProb: _*) + DenseVector(weightedProb: _*)
-    BreadCrumbCategory(storeId, storeName, noItems + other.noItems, probSum.toArray)
+    BreadCrumbCategory(storeId, storeName, noItems + other.noItems, probSum.toArray, tokenSparsity + tokenSparsity)
   }
 
   def category(topLevelModel: TopLevelModel) = {
     val (categoryId, category, probability) = topLevelModel.predictCategory(DenseVector(weightedProb: _*))
-    CategoryPrediction(storeId, storeName, categoryId, category, probability, noItems)
+    CategoryPrediction(storeId, storeName, categoryId, category, probability, noItems, tokenSparsity)
   }
 
   def normalize = (DenseVector(weightedProb) / noItems.toDouble).toArray
 }
 
-case class CategoryPrediction(storeId: Long, storeName: String, categoryId: Long, category: String, weightedProb: Double, noItems: Long) {
+case class CategoryPrediction(storeId: Long, storeName: String, categoryId: Long, category: String, weightedProb: Double, noItems: Long, tokenSparsity: Double) {
   def prob = weightedProb / noItems
 }
 
@@ -60,7 +62,7 @@ object BreadCrumbAnalyzer {
       StructField("storeId", LongType, nullable = false),
       StructField("storeName", StringType, nullable = false),
       StructField("noItems", LongType, nullable = false)
-    ) ++ (0 to model.categoryIds.size - 1).map(x => StructField("p_" + model.categoryIds(x), DoubleType, nullable = false))
+    ) ++ (0 until model.categoryIds.size).map(x => StructField("p_" + model.categoryIds(x), DoubleType, nullable = false))
     val schema = StructType(fields)
     val breadCrumbCategory = breadCrumbsDs.rdd.map(r => {
       val model = TopLevelModel()
@@ -80,8 +82,11 @@ object BreadCrumbAnalyzer {
       x.category(model)
     }).toDS()
 
-    val categoryDF = categoryForBreadCrumb.groupBy("storeId", "storeName", "categoryId", "category").agg(expr("sum(weightedProb)/sum(noItems) as probability").as[Double])
+    val categoryDF = categoryForBreadCrumb.groupBy("storeId", "storeName", "categoryId", "category")
+      .agg(expr("sum(weightedProb)/sum(noItems) as probability").as[Double],
+        expr("sum(tokenSparsity)/sum(noItems) as sparsity").as[Double]).filter("sparsity > 0.0")
     categoryDF.show()
+    categoryDF.coalesce(1).write.mode("overwrite").json("cat_"+outputFile)
     spark.stop()
   }
 

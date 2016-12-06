@@ -124,15 +124,16 @@ class TopLevelModel(modelPath: String) extends Serializable {
     val tokenFreq = for {
       (token, values) <- tokenize(doc).groupBy(identity)
     } yield (vocabulary(token), values.length.toDouble)
-    if (tokenFreq.size >0 ){
+    if (tokenFreq.nonEmpty) {
       val vector = SparseVector(vocabulary.size)(tokenFreq.toSeq: _*)
       normalize(vector / sum(vector), 2.0)
-    } else SparseVector(vocabulary.size)(0->0.0)
+    } else SparseVector(vocabulary.size)(0 -> 0.0)
   }
 
   def categorize(doc: String) = {
-    val prob: DenseVector[Double] = predictProba(doc)
-    predictCategory(prob)
+    val (sparsity, prob): (Double, DenseVector[Double]) = predictProba(doc)
+    val (categoryId, category, probability) = predictCategory(prob)
+    (categoryId, category, probability, sparsity)
   }
 
   def predictCategory(prob: DenseVector[Double]): (Int, String, Double) = {
@@ -142,9 +143,12 @@ class TopLevelModel(modelPath: String) extends Serializable {
     (categoryId, category, prob(maxarg))
   }
 
-  def predictProba(doc: String): DenseVector[Double] = {
-    val prob = predictProba(vectorize(doc))
-    prob
+  def predictProba(doc: String): (Double, DenseVector[Double]) = {
+    val vector: SparseVector[Double] = vectorize(doc)
+    val numTokens = vector.activeSize
+    val tokenRatio = numTokens.toDouble / vector.size
+    val prob = predictProba(vector)
+    (tokenRatio, prob)
   }
 }
 
