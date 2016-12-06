@@ -8,14 +8,14 @@ import org.apache.spark.sql.types.StructField
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types._
 
-case class BreadCrumb(storeId: BigInt, storeName: String, breadCrumbs: String, noItems: BigInt) {
+case class BreadCrumb(storeId: Long, storeName: String, breadCrumbs: String, noItems: Long) {
   def categorize(topLevelModel: TopLevelModel) = {
     val prob = topLevelModel.predictProba(breadCrumbs)
     BreadCrumbCategory(storeId, storeName, noItems, prob.toArray)
   }
 }
 
-case class BreadCrumbCategory(storeId: BigInt, storeName: String, noItems: BigInt, prob: Array[Double]) {
+case class BreadCrumbCategory(storeId: Long, storeName: String, noItems: Long, prob: Array[Double]) {
 
   def weightedProb: DenseVector[Double] = DenseVector(prob: _*) * noItems.toDouble
 
@@ -53,7 +53,7 @@ object BreadCrumbAnalyzer {
       val model = TopLevelModel()
       r.categorize(model)
     })
-    val byStore: RDD[(BigInt, BreadCrumbCategory)] = breadCrumbCategory.keyBy(x => x.storeId)
+    val byStore: RDD[(Long, BreadCrumbCategory)] = breadCrumbCategory.keyBy(x => x.storeId)
     val storeWiseProbs = byStore.reduceByKey(_ + _).values.map(r => Row.fromSeq(Seq(r.storeId, r.storeName) ++ r.normalize))
 
     val storeWiseProbsDF = spark.createDataFrame(storeWiseProbs, schema)
