@@ -10,19 +10,17 @@ import org.apache.spark.sql.types._
 
 case class BreadCrumb(storeId: Long, storeName: String, breadCrumbs: String, noItems: Long) {
   def categorize(topLevelModel: TopLevelModel) = {
-    val prob = topLevelModel.predictProba(breadCrumbs)
+    val prob = topLevelModel.predictProba(breadCrumbs) * noItems.toDouble
     BreadCrumbCategory(storeId, storeName, noItems, prob.toArray)
   }
 }
 
 case class BreadCrumbCategory(storeId: Long, storeName: String, noItems: Long, prob: Array[Double]) {
 
-  def weightedProb: DenseVector[Double] = DenseVector(prob: _*) * noItems.toDouble
-
   def +(other: BreadCrumbCategory) = {
     require(storeId == other.storeId)
-    val prob: DenseVector[Double] = weightedProb + other.weightedProb
-    BreadCrumbCategory(storeId, storeName, noItems + other.noItems, prob.toArray)
+    val probSum: DenseVector[Double] = DenseVector(other.prob:_*) + DenseVector(prob:_*)
+    BreadCrumbCategory(storeId, storeName, noItems + other.noItems, probSum.toArray)
   }
 
   def normalize = (DenseVector(prob) / noItems.toDouble).toArray
@@ -45,7 +43,8 @@ object BreadCrumbAnalyzer {
     implicit lazy val model = TopLevelModel()
     val fields = Seq(
       StructField("storeId", LongType, nullable = false),
-      StructField("storeName", StringType, nullable = false)
+      StructField("storeName", StringType, nullable = false),
+      StructField("noItems", LongType, nullable = false)
     ) ++ (0 to model.categoryIds.size - 1).map(x => StructField("p_" + model.categoryIds(x), DoubleType, nullable = false))
     val schema = StructType(fields)
 
@@ -54,10 +53,11 @@ object BreadCrumbAnalyzer {
       r.categorize(model)
     })
     val byStore: RDD[(Long, BreadCrumbCategory)] = breadCrumbCategory.keyBy(x => x.storeId)
-    val storeWiseProbs = byStore.reduceByKey(_ + _).values.map(r => Row.fromSeq(Seq(r.storeId, r.storeName) ++ r.normalize))
+    val storeWiseProbs = byStore.reduceByKey(_ + _).values.map(r => Row.fromSeq(Seq(r.storeId, r.storeName, r.noItems) ++ r.normalize))
 
     val storeWiseProbsDF = spark.createDataFrame(storeWiseProbs, schema)
-    storeWiseProbsDF.coalesce(1).write.option("compression", "gzip").mode("overwrite").json(outputFile)
+    storeWiseProbsDF.show()
+    storeWiseProbsDF.coalesce(1).write.mode("overwrite").json(outputFile)
     spark.stop()
   }
 
