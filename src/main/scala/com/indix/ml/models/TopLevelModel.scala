@@ -3,7 +3,6 @@ package com.indix.ml.models
 import breeze.linalg.{DenseVector, SparseVector, argmax, normalize, sum, convert}
 import breeze.numerics.exp
 import com.indix.ml.preprocessing.tokenizers.WordNetTokenizer
-import org.apache.log4j.{Level, Logger}
 import org.json4s._
 import org.json4s.native.JsonMethods._
 
@@ -12,9 +11,7 @@ import scala.io.BufferedSource
 /**
   * Created by vumaasha on 29/11/16.
   */
-class TopLevelModel(modelPath: String) {
-  val logger = Logger.getLogger(this.getClass.getName)
-  logger.setLevel(Level.INFO)
+class TopLevelModel(modelPath: String) extends Serializable {
 
   def readJsonFromResource(path: String) = {
     val jsonResource = getClass.getResourceAsStream("/" + path)

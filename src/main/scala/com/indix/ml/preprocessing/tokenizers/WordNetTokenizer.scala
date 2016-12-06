@@ -10,7 +10,7 @@ import scala.collection.JavaConverters._
 /**
   * Created by vumaasha on 5/12/16.
   */
-class WordNetTokenizer(wordNetDir:String) {
+class WordNetTokenizer(wordNetDir:String) extends Serializable{
   val dict = new RAMDictionary(new File(wordNetDir))
   dict.setLoadPolicy(ILoadPolicy.IMMEDIATE_LOAD)
   dict.open()
