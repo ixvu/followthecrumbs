@@ -46,6 +46,7 @@ object BreadCrumbAnalyzer {
     logger.setLevel(Level.INFO)
     val inputFile = args(0)
     val outputFile = args(1)
+    val outputFile2 = args(2)
     val breadCrumbsFile = inputFile
     logger.info(s"The inputfile is $inputFile")
     logger.info(s"The output file is $outputFile")
@@ -86,7 +87,7 @@ object BreadCrumbAnalyzer {
       .agg(expr("sum(weightedProb)/sum(noItems) as probability").as[Double],
         expr("sum(tokenSparsity)/sum(noItems) as sparsity").as[Double]).filter("sparsity > 0.0")
     categoryDF.show()
-    categoryDF.coalesce(1).write.mode("overwrite").json("cat_"+outputFile)
+    categoryDF.coalesce(1).write.mode("overwrite").json(outputFile2)
     spark.stop()
   }
 
