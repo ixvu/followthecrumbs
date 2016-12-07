@@ -45,15 +45,14 @@ object BreadCrumbAnalyzer {
     val logger = Logger.getLogger(this.getClass.getName)
     logger.setLevel(Level.INFO)
     val inputFile = args(0)
-    val outputFile = args(1)
-    val outputFile2 = args(2)
+    val storeWiseCategoryProbabilities = args(1)
+    val storeWiseCategoryPredictions = args(2)
     val breadCrumbsFile = inputFile
     logger.info(s"The inputfile is $inputFile")
-    logger.info(s"The output file is $outputFile")
+    logger.info(s"The output file is $storeWiseCategoryProbabilities")
     val spark = SparkSession.builder().appName("BreadCrumbAnalyzer").getOrCreate()
     import spark.implicits._
     val breadCrumbsDs = spark.read.json(breadCrumbsFile).as[BreadCrumb]
-    breadCrumbsDs.cache().createOrReplaceTempView("store_bc")
     implicit lazy val model = TopLevelModel()
 
     /*
@@ -68,12 +67,12 @@ object BreadCrumbAnalyzer {
     val breadCrumbCategory = breadCrumbsDs.rdd.map(r => {
       val model = TopLevelModel()
       r.categorize(model)
-    })
+    }).filter(x => x.tokenSparsity > 0.0)
     val byStore: RDD[(Long, BreadCrumbCategory)] = breadCrumbCategory.keyBy(x => x.storeId)
     val categoryProbabilities: RDD[BreadCrumbCategory] = byStore.reduceByKey(_ + _).values
     val storeWiseProbs = categoryProbabilities.map(r => Row.fromSeq(Seq(r.storeId, r.storeName, r.noItems) ++ r.normalize))
     val storeWiseProbsDF = spark.createDataFrame(storeWiseProbs, schema)
-    storeWiseProbsDF.coalesce(1).write.mode("overwrite").json(outputFile)
+    storeWiseProbsDF.coalesce(1).write.mode("overwrite").json(storeWiseCategoryProbabilities)
 
     /*
     Compute the store wise weighted aggregate of category predicted for each breadcrumb, weighted by breadcrumb frequency
@@ -87,7 +86,7 @@ object BreadCrumbAnalyzer {
       .agg(expr("sum(weightedProb)/sum(noItems) as probability").as[Double],
         expr("sum(tokenSparsity)/sum(noItems) as sparsity").as[Double]).filter("sparsity > 0.0")
     categoryDF.show()
-    categoryDF.coalesce(1).write.mode("overwrite").json(outputFile2)
+    categoryDF.coalesce(1).write.mode("overwrite").json(storeWiseCategoryPredictions)
     spark.stop()
   }
 
