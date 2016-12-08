@@ -10,10 +10,16 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions._
 
 case class BreadCrumb(storeId: Long, storeName: String, breadCrumbs: String, noItems: Long) {
+  @transient lazy val logger = Logger.getLogger(this.getClass.getName)
+
   def categorize(topLevelModel: TopLevelModel) = {
+    logger.info("before predict")
     val (sparsity, probability): (Double, DenseVector[Double]) = topLevelModel.predictProba(breadCrumbs)
+    logger.info("after predict")
     val prob = probability * noItems.toDouble
+    logger.info("after scaling")
     val weightedSparsity = sparsity * noItems.toDouble
+    logger.debug(s"categorizing $storeId")
     BreadCrumbCategory(storeId, storeName, noItems, prob.toArray, weightedSparsity)
   }
 
@@ -42,44 +48,46 @@ case class CategoryPrediction(storeId: Long, storeName: String, categoryId: Long
 
 object BreadCrumbAnalyzer {
   def main(args: Array[String]) {
-    val logger = Logger.getLogger(this.getClass.getName)
+    @transient lazy val logger = Logger.getLogger(this.getClass.getName)
     logger.setLevel(Level.INFO)
     val inputFile = args(0)
     val storeWiseCategoryProbabilities = args(1)
     val storeWiseCategoryPredictions = args(2)
     val breadCrumbsFile = inputFile
     logger.info(s"The inputfile is $inputFile")
-    logger.info(s"The output file is $storeWiseCategoryProbabilities")
+    logger.info(s"The output files are $storeWiseCategoryProbabilities and $storeWiseCategoryPredictions")
     val spark = SparkSession.builder().appName("BreadCrumbAnalyzer").getOrCreate()
     import spark.implicits._
-    val breadCrumbsDs = spark.read.json(breadCrumbsFile).as[BreadCrumb]
+    val breadCrumbsDs = spark.read.json(breadCrumbsFile).as[BreadCrumb].cache()
     implicit lazy val model = TopLevelModel()
+    breadCrumbsDs.show()
 
-    /*
-    Compute the weighted average of store wise probabilities weighted by the breadcrumb frequency
-     */
+    /*    Compute the weighted average of store wise probabilities weighted by the breadcrumb frequency*/
     val fields = Seq(
       StructField("storeId", LongType, nullable = false),
       StructField("storeName", StringType, nullable = false),
       StructField("noItems", LongType, nullable = false)
     ) ++ (0 until model.categoryIds.size).map(x => StructField("p_" + model.categoryIds(x), DoubleType, nullable = false))
     val schema = StructType(fields)
-    val breadCrumbCategory = breadCrumbsDs.rdd.map(r => {
+    val breadCrumbCategory = breadCrumbsDs.rdd.mapPartitions(iterator => {
       val model = TopLevelModel()
-      r.categorize(model)
+      iterator.map(r =>
+        r.categorize(model)
+      )
     }).filter(x => x.tokenSparsity > 0.0)
     val byStore: RDD[(Long, BreadCrumbCategory)] = breadCrumbCategory.keyBy(x => x.storeId)
     val categoryProbabilities: RDD[BreadCrumbCategory] = byStore.reduceByKey(_ + _).values
     val storeWiseProbs = categoryProbabilities.map(r => Row.fromSeq(Seq(r.storeId, r.storeName, r.noItems) ++ r.normalize))
     val storeWiseProbsDF = spark.createDataFrame(storeWiseProbs, schema)
+    storeWiseProbsDF.show()
     storeWiseProbsDF.coalesce(1).write.mode("overwrite").json(storeWiseCategoryProbabilities)
 
-    /*
-    Compute the store wise weighted aggregate of category predicted for each breadcrumb, weighted by breadcrumb frequency
-     */
-    val categoryForBreadCrumb: Dataset[CategoryPrediction] = breadCrumbCategory.map(x => {
+    /*    Compute the store wise weighted aggregate of category predicted for each breadcrumb, weighted by breadcrumb frequency*/
+    val categoryForBreadCrumb: Dataset[CategoryPrediction] = breadCrumbCategory.mapPartitions(iterator => {
       val model = TopLevelModel()
-      x.category(model)
+      iterator.map( x => {
+         x.category(model)
+      })
     }).toDS()
 
     val categoryDF = categoryForBreadCrumb.groupBy("storeId", "storeName", "categoryId", "category")
