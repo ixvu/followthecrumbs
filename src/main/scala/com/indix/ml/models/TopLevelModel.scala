@@ -1,8 +1,9 @@
 package com.indix.ml.models
 
-import breeze.linalg.{DenseVector, SparseVector, argmax, normalize, sum, convert}
+import breeze.linalg.{DenseVector, SparseVector, argmax, convert, normalize, sum}
 import breeze.numerics.exp
 import com.indix.ml.preprocessing.tokenizers.WordNetTokenizer
+import org.apache.log4j.Logger
 import org.json4s._
 import org.json4s.native.JsonMethods._
 
@@ -12,6 +13,8 @@ import scala.io.BufferedSource
   * Created by vumaasha on 29/11/16.
   */
 class TopLevelModel(modelPath: String) extends Serializable {
+
+  val logger = Logger.getLogger(this.getClass)
 
   def readJsonFromResource(path: String) = {
     val jsonResource = getClass.getResourceAsStream("/" + path)
@@ -107,7 +110,14 @@ class TopLevelModel(modelPath: String) extends Serializable {
   val tokenizer = WordNetTokenizer()
 
   def tokenize(doc: String) = {
-    val stems = tokenizer.tokenize(doc)
+    val stems:Array[String] = try {
+      tokenizer.tokenize(doc)
+    } catch {
+      case e:Throwable =>
+        logger.warn(s"Problem with tokenizing $doc")
+        logger.warn(e)
+        Array.empty
+    }
     val coocc = for {
       stemI <- stems.zipWithIndex
       stemJ <- stems.zipWithIndex if stemJ._2 > stemI._2

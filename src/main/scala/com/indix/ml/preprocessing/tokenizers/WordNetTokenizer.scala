@@ -17,7 +17,7 @@ class WordNetTokenizer(wordNetDir:String) extends Serializable{
   val stemmer = new WordnetStemmer(dict)
 
   def tokenize(doc: String) = {
-    val token_pattern = "\\b\\w\\w+\\b".r
+    val token_pattern = "\\b[a-z0-9][a-z0-9]+\\b".r
     val stems = {
       for {
         token <- token_pattern.findAllIn(doc.toLowerCase)

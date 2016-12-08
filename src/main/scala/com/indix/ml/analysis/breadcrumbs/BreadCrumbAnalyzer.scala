@@ -63,7 +63,7 @@ object BreadCrumbAnalyzer {
     logger.info(s"The output files are $storeWiseCategoryProbabilities and $storeWiseCategoryPredictions")
     val spark = SparkSession.builder().appName("BreadCrumbAnalyzer").getOrCreate()
     import spark.implicits._
-    val breadCrumbsDs = spark.read.json(breadCrumbsFile).as[BreadCrumb].cache()
+    val breadCrumbsDs = spark.read.json(breadCrumbsFile).as[BreadCrumb].filter(x=> x.breadCrumbs.nonEmpty).cache()
     logger.debug("Completed reading breadcrumb json data")
     implicit lazy val model = TopLevelModel()
 
