@@ -156,7 +156,7 @@ object TopLevelModel {
 
   def apply(modelPath: String): TopLevelModel = new TopLevelModel(modelPath)
 
-  def apply(): TopLevelModel = new TopLevelModel("TopLevelModel.json")
+  def apply(): TopLevelModel = new TopLevelModel("L2TopLevelModel.json")
 }
 
 
