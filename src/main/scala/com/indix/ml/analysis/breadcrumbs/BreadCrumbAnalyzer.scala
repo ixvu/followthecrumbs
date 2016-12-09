@@ -51,19 +51,22 @@ case class CategoryPrediction(storeId: Long, storeName: String, categoryId: Long
 
 
 object BreadCrumbAnalyzer {
+
+
   def main(args: Array[String]) {
     @transient lazy val logger = Logger.getLogger(this.getClass.getName)
     val inputFile = args(0)
     val storeWiseCategoryProbabilities = args(1)
     val storeWiseCategoryPredictions = args(2)
-    val loggingLevel = if (args.length < 4) Level.WARN else if (args(3).equals("DEBUG")) Level.DEBUG else Level.INFO
+    val breadCrumbPredictions: String = args(3)
+    val loggingLevel = if (args.length < 5) Level.WARN else if (args(4).equals("DEBUG")) Level.DEBUG else Level.INFO
     logger.setLevel(loggingLevel)
     val breadCrumbsFile = inputFile
     logger.info(s"The inputfile is $inputFile")
-    logger.info(s"The output files are $storeWiseCategoryProbabilities and $storeWiseCategoryPredictions")
+    logger.info(s"The output files are $breadCrumbPredictions and $storeWiseCategoryProbabilities and $storeWiseCategoryPredictions")
     val spark = SparkSession.builder().appName("BreadCrumbAnalyzer").getOrCreate()
     import spark.implicits._
-    val breadCrumbsDs = spark.read.json(breadCrumbsFile).as[BreadCrumb].filter(x=> x.breadCrumbs.nonEmpty).cache()
+    val breadCrumbsDs = spark.read.json(breadCrumbsFile).as[BreadCrumb].filter(x => x.breadCrumbs.nonEmpty).cache()
     logger.debug("Completed reading breadcrumb json data")
     implicit lazy val model = TopLevelModel()
 
@@ -79,15 +82,35 @@ object BreadCrumbAnalyzer {
       iterator.map(r => {
         val categoryProbabilities = r.categorize(model)
         val categoryPrediction = categoryProbabilities.category(model)
-        (categoryProbabilities, categoryPrediction)
+        (categoryProbabilities, categoryPrediction, r.breadCrumbs)
       }
       )
     }).filter(x => x._1.tokenSparsity > 0.0).cache()
+
+   val predictFields = Seq(
+     StructField("storeId",LongType,nullable = false),
+     StructField("breadCrumb",StringType,nullable = true),
+     StructField("categoryId",LongType,nullable = false),
+     StructField( "category",StringType,nullable = false),
+     StructField("noItems",LongType,nullable = false),
+     StructField("probability",DoubleType,nullable = false),
+     StructField("sparsity",DoubleType,nullable = false)
+   )
+    val predictionsSchema = StructType(predictFields)
+    val predictions = breadCrumbCategory.map(x => {
+      val breadCrumb = x._3
+      val categoryPrediction = x._2
+      Row.fromSeq(Seq(categoryPrediction.storeId, breadCrumb, categoryPrediction.categoryId, categoryPrediction.category, categoryPrediction.noItems, categoryPrediction.weightedProb, categoryPrediction.tokenSparsity))
+    })
+    val predictionsDF = spark.createDataFrame(predictions,predictionsSchema)
+    predictionsDF.write.option("compression", "gzip").mode("overwrite").json(breadCrumbPredictions)
+    logger.info("completed writing breadcrumb predictions")
+
     val byStore: RDD[(Long, BreadCrumbCategory)] = breadCrumbCategory.map(x => x._1).keyBy(x => x.storeId)
     val categoryProbabilities: RDD[BreadCrumbCategory] = byStore.reduceByKey(_ + _).values
     val storeWiseProbs = categoryProbabilities.map(r => Row.fromSeq(Seq(r.storeId, r.storeName, r.noItems) ++ r.normalize))
     val storeWiseProbsDF = spark.createDataFrame(storeWiseProbs, schema)
-    storeWiseProbsDF.coalesce(1).write.option("compression","gzip").mode("overwrite").json(storeWiseCategoryProbabilities)
+    storeWiseProbsDF.write.option("compression", "gzip").mode("overwrite").json(storeWiseCategoryProbabilities)
     logger.info("completed writing store wise probabilities")
 
     /*    Compute the store wise weighted aggregate of category predicted for each breadcrumb, weighted by breadcrumb frequency*/
@@ -96,7 +119,7 @@ object BreadCrumbAnalyzer {
     val categoryDF = categoryForBreadCrumb.groupBy("storeId", "storeName", "categoryId", "category")
       .agg(expr("sum(weightedProb)/sum(noItems) as probability").as[Double],
         expr("sum(tokenSparsity)/sum(noItems) as sparsity").as[Double]).filter("probability > 0.5").orderBy("storeId")
-    categoryDF.coalesce(1).write.option("compression","gzip").mode("overwrite").json(storeWiseCategoryPredictions)
+    categoryDF.write.option("compression", "gzip").mode("overwrite").json(storeWiseCategoryPredictions)
     logger.info("completed writing store wise category predictions")
     spark.stop()
   }
